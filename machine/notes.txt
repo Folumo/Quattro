@@ -1,0 +1,4 @@
+Every byte you see here came
+off a real file. The drive
+device opens machine/ on the
+host, so the machine's filesystem and yours are the same thing.

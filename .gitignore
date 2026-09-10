@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environment (rebuildable: pip install numpy pygame)
+.venv/
+venv/
+env/
+
+# IDE / editor
+.idea/
+.vscode/
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
+# Generated build artifacts -- rebuilt by `python main.py boot`
+machine/bin/*.bin
+
+# Machine runtime output -- written on each boot/run
+machine/boot.log
+machine/out.txt

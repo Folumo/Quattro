@@ -1,0 +1,9 @@
+Quattro is a base-4 computer.
+Every gate in it is built
+from MIN MAX NOT COM MOD EQ.
+
+A word is 16 quaternary digits (32 bits), which is exactly one instruction
+frame -- so loading a program is a straight copy, one word per instruction.
+
+This file lives in a subfolder, which is why the desktop shows docs/ as a
+folder rather than a file: the drive refuses to READ a directory.
