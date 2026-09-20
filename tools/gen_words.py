@@ -94,54 +94,46 @@ def generate(W):
     line('')
     line('')
 
-    # ============================ WORD_x_DIGIT ============================
-    # A (W digits) * one digit d -> W+1 digits.
-    line('@ROM')
-    line('def WORD_x_DIGIT(A, d):')
-    a = unpack('a', 'A', W)
-    for i in range(W):
-        line(f'    h{i}, l{i} = HF_MULTIPLY({a[i]}, d)')
-    line('    o0 = l0')
-    line('    k = h0')
-    for i in range(1, W):
-        line(f'    c, o{i} = HF_ADDER(l{i}, k)')
-        line(f'    _, k = HF_ADDER(h{i}, c)')
-    line(f'    o{W} = k')
-    line(f'    return ({", ".join(f"o{i}" for i in range(W + 1))})')
-    line('')
-    line('')
-
     # ============================ WMUL ===================================
-    # sum of shifted partial products; keep low W digits + overflow flag.
+    # Low-word multiply. The product is one word (mod 4**W), so only the lower
+    # triangle of partial products is built: digit i of A times digit j of B
+    # lands at position i+j, and any digit that would reach position W or beyond
+    # is discarded. The old version summed the full 2W-digit product and threw
+    # its top half away -- ~56% more gates for nothing. Overflow is no longer
+    # reported (that flag was never read by any program); the (flag, low) tuple
+    # shape is kept for W_ALU, with a constant-0 flag.
     line('@ROM')
     line('def WMUL(A, B):')
+    a = unpack('a', 'A', W)
     b = unpack('b', 'B', W)
+    acc = ['0'] * W
     for j in range(W):
-        pj = ', '.join(f'p{j}_{k}' for k in range(W + 1))
-        line(f'    ({pj}) = WORD_x_DIGIT(A, {b[j]})')
-    acc = ['0'] * (2 * W)
-    for j in range(W):
-        carry = '0'
-        for k in range(W + 1):
-            pos = j + k
+        n = W - j                       # partial-product digits that fit: 0..W-1-j
+        hi, lo = [], []
+        for i in range(n):
+            hv, lv = fresh('h'), fresh('l')
+            line(f'    {hv}, {lv} = HF_MULTIPLY({a[i]}, {b[j]})')
+            hi.append(hv)
+            lo.append(lv)
+        p = [lo[0]]                     # A * b[j], carry-chained, truncated to n digits
+        k = hi[0]
+        for i in range(1, n):
+            cv, ov = fresh('c'), fresh('o')
+            line(f'    {cv}, {ov} = HF_ADDER({lo[i]}, {k})')
+            p.append(ov)
+            if i < n - 1:
+                kv = fresh('k')
+                line(f'    _, {kv} = HF_ADDER({hi[i]}, {cv})')
+                k = kv
+        carry = '0'                     # add the shifted partial into acc[j..W-1]
+        for i in range(n):
+            pos = j + i
             cv, sv = fresh('mc'), fresh('ms')
-            line(f'    {cv}, {sv} = FULL_ADD({acc[pos]}, p{j}_{k}, {carry})')
+            line(f'    {cv}, {sv} = FULL_ADD({acc[pos]}, {p[i]}, {carry})')
             acc[pos] = sv
             carry = cv
-        pos = j + W + 1
-        while pos < 2 * W:
-            cv, sv = fresh('mc'), fresh('ms')
-            line(f'    {cv}, {sv} = FULL_ADD({acc[pos]}, 0, {carry})')
-            acc[pos] = sv
-            carry = cv
-            pos += 1
-    low = ', '.join(acc[:W])
-    hi_or = 'MAX(' * (2 * W - W - 1) + acc[W]
-    for k in range(W + 1, 2 * W):
-        hi_or += f', {acc[k]})'
-    line(f'    low = ({low})')
-    line(f'    overflow = MIN(1, {hi_or})')
-    line('    return overflow, low')
+    line(f'    low = ({", ".join(acc)})')
+    line('    return 0, low')
     line('')
     line('')
 

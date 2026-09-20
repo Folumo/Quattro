@@ -225,7 +225,64 @@ Layout:
     `elif` on `contexts is None`; `INT_VECTOR_HI` (port 238) is a dead port —
     latched on write, never read, since `int_vec` became a full word.
 
+- [DONE] **Version control, at last.** `git init` + a private GitHub repo
+  (github.com/Folumo/Quattro, branch `main`, first commit fd6dd9c, 53 files).
+  `.venv`, `.idea/`, local `.claude` settings and generated `.bin`/`boot.log` are
+  gitignored. From "not even a git repo" to full history stored off-machine.
+
+- [DONE] **Hardware blueprint diagram + primitive census.** A private Artifact:
+  the WHOLE machine in one full-scale frame — the CPU opened up (decode, operand
+  mux, PC, the ALU with its 8 op-units + one-hot select, register file x2, return
+  stack, jump/branch) wired out to code ROM, load port, clock, address decoder,
+  data RAM and the 8-device bus, every block annotated with its gate subtotal.
+  Plus a RIGOROUS count: a script (scratchpad/count.py) parses quattro/*.py,
+  expands each block's netlist to leaves (the core is branch/loop-free, so one
+  expansion is the exact static count; ALU cross-checks two ways), and totals
+  (after the multiplier optimization below) **26,151 primitive gates** — MIN
+  6,932 · MAX 4,501 · NOT 3,635 · COM 3,850 · MOD 5,519 · EQ 1,714. ALU = 22,353
+  (85%); WDIV 14,879 is now the single biggest block, WMUL 6,063. Memory arrays
+  (code ROM <=65,536 words, data RAM <=4.29B words, 512q of register bits)
+  reported by capacity not gates; 8 devices excluded as I/O.
+  https://claude.ai/artifact/DKHg86ST2L9mC84HLVEMGy
+
+- [DONE] **Multiplier shrunk 56% (13,864 -> 6,063 gates), behaviour identical.**
+  WMUL summed the FULL 2W-digit product then discarded the top half; the result
+  is one word (mod 4^16), so only the lower triangle of partial products matters.
+  Rewrote the generator (tools/gen_words.py) to build just that triangle inline
+  (dropping the WORD_x_DIGIT helper), regenerated words.py. The overflow flag —
+  written but never read by any program (JCMP compares value regs, not the arith
+  flag) — is now a constant 0, so nothing observable changed. Verified: WMUL
+  bit-exact over 20k cases, generator still reproduces words.py, purity holds, all
+  92 tests pass. Whole-machine logic 33,952 -> 26,151 (-23%). Next lever is much
+  bigger — see the WDIV / software-mul-div task below.
+
 ## Open
+
+- [TASK] **The big ALU lever: no hardware multiply/divide (software instead).**
+  The single-cycle combinational WMUL+WDIV are 20,942 of the machine's 26,151
+  logic gates. Real minimal CPUs (6502, early ARM, RISC-V base with no M
+  extension) have NEITHER — they do mul/div in software (shift-and-add /
+  shift-and-subtract). Dropping both from the ALU takes the whole logic from
+  26,151 to ~5,209 gates (ALU ~1,411) — an ~80% cut, by far the biggest reduction
+  available and the thing most standing between this and a buildable machine.
+  Cost: `*`, `/`, `%` become multi-instruction runtime helpers — the C compiler
+  emits a call instead of a single MUL/DIV (it already emits calls + has a stack),
+  and asm loses the MUL/DIV mnemonics (or keeps them as pseudo-ops that call the
+  helpers). Middle option: a sequential multi-cycle mul/div unit (one digit-cell
+  reused over 16 cycles + accumulator + a small FSM) — ~1/16 the gates while
+  staying in hardware, but it breaks the pure single-cycle branch-free design.
+  WDIV alone could also be trimmed (non-restoring), but that is marginal next to
+  this.
+
+- [TASK] **Physical realization of one primitive** — the question the blueprint
+  deliberately left below itself. On the diagram each MIN/MAX/NOT/COM/MOD/EQ box
+  is abstract (the six primitives ARE the interface). Before any real build,
+  decide how a single base-4 gate becomes a physical device: 2-bit-per-quarter
+  binary logic (74HC), one EEPROM truth-table per gate (maps directly onto the
+  @ROM memoization the sim already uses — a 2-input base-4 gate is a 16-entry x
+  2-bit table), or an FPGA target generated from the tools/gen_words.py netlist.
+  Once chosen, a chip-level sheet with pin wiring can follow the block/gate-level
+  blueprint that already exists.
 
 - [TASK] **Signed arithmetic — much closer than "no signed arithmetic" suggests.**
   The hardware is ALREADY two's-complement correct: `3 - 10` produces exactly the
@@ -259,9 +316,6 @@ Layout:
 - [TASK] `dump()` scans only data 0..228, so it never shows the C toolchain's
   globals (1024+), the stack (20000+) or the heap (40000+) — i.e. nothing a C
   program actually uses.
-- [TASK] **This is not a git repository.** ~6800 lines of hand-built work with no
-  version control and no way to see or undo a bad change. `git init` would be the
-  single cheapest risk reduction available.
 - [TASK] GPU polish (optional): double buffering / vsync, sprite transparency,
   a proper built-in font in the device (today the front-end uploads one), clipping
   rectangles, a blitter "copy region" op.
