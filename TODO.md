@@ -238,9 +238,9 @@ Layout:
   Plus a RIGOROUS count: a script (scratchpad/count.py) parses quattro/*.py,
   expands each block's netlist to leaves (the core is branch/loop-free, so one
   expansion is the exact static count; ALU cross-checks two ways), and totals
-  (after the multiplier optimization below) **26,151 primitive gates** — MIN
-  6,932 · MAX 4,501 · NOT 3,635 · COM 3,850 · MOD 5,519 · EQ 1,714. ALU = 22,353
-  (85%); WDIV 14,879 is now the single biggest block, WMUL 6,063. Memory arrays
+  (after the multiplier + divider optimizations below) **22,441 primitive
+  gates** — MIN 6,592 · MAX 4,399 · NOT 2,987 · COM 3,170 · MOD 4,363 · EQ 930.
+  ALU = 18,643 (83%); WDIV 11,169 is the single biggest block, WMUL 6,063. Memory arrays
   (code ROM <=65,536 words, data RAM <=4.29B words, 512q of register bits)
   reported by capacity not gates; 8 devices excluded as I/O.
   https://claude.ai/artifact/DKHg86ST2L9mC84HLVEMGy
@@ -253,26 +253,39 @@ Layout:
   written but never read by any program (JCMP compares value regs, not the arith
   flag) — is now a constant 0, so nothing observable changed. Verified: WMUL
   bit-exact over 20k cases, generator still reproduces words.py, purity holds, all
-  92 tests pass. Whole-machine logic 33,952 -> 26,151 (-23%). Next lever is much
-  bigger — see the WDIV / software-mul-div task below.
+  92 tests pass. Whole-machine logic 33,952 -> 26,151 (-23%).
+
+- [DONE] **Divider shrunk 25% (14,879 -> 11,169 gates), behaviour identical.**
+  Restoring division did 4 full-width subtractions per stage: three "R >= kB"
+  comparisons (each a throwaway subtract) plus a subtract of q*B, and precomputed
+  2B/3B. But a comparison IS a subtraction -- so subtract B three times in a
+  CHAIN (Rp-B, -B, -B), keep the differences: the borrows give the quotient digit
+  and the matching difference IS the new remainder. Three subtracts per stage, no
+  2B/3B. Rewrote WDIV in the generator, regenerated. Verified: quotient AND
+  remainder bit-exact over 30k cases, generator reproduces words.py, purity holds,
+  all 92 tests pass. ALU 22,353 -> 18,643; whole-machine logic 26,151 -> 22,441.
+  Cumulative with the multiplier: **33,952 -> 22,441 (-34%)**. WDIV (11,169) is
+  still the single biggest block; the big remaining lever is the software-mul-div
+  task below.
 
 ## Open
 
 - [TASK] **The big ALU lever: no hardware multiply/divide (software instead).**
-  The single-cycle combinational WMUL+WDIV are 20,942 of the machine's 26,151
-  logic gates. Real minimal CPUs (6502, early ARM, RISC-V base with no M
-  extension) have NEITHER — they do mul/div in software (shift-and-add /
-  shift-and-subtract). Dropping both from the ALU takes the whole logic from
-  26,151 to ~5,209 gates (ALU ~1,411) — an ~80% cut, by far the biggest reduction
-  available and the thing most standing between this and a buildable machine.
+  Even after the truncation + fusion above, the single-cycle combinational
+  WMUL+WDIV are 17,232 of the machine's 22,441 logic gates. Real minimal CPUs
+  (6502, early ARM, RISC-V base with no M extension) have NEITHER — they do
+  mul/div in software (shift-and-add / shift-and-subtract). Dropping both from the
+  ALU takes the whole logic from 22,441 to ~5,209 gates (ALU ~1,411) — a ~77% cut,
+  by far the biggest reduction available and the thing most standing between this
+  and a buildable machine.
   Cost: `*`, `/`, `%` become multi-instruction runtime helpers — the C compiler
   emits a call instead of a single MUL/DIV (it already emits calls + has a stack),
   and asm loses the MUL/DIV mnemonics (or keeps them as pseudo-ops that call the
   helpers). Middle option: a sequential multi-cycle mul/div unit (one digit-cell
   reused over 16 cycles + accumulator + a small FSM) — ~1/16 the gates while
   staying in hardware, but it breaks the pure single-cycle branch-free design.
-  WDIV alone could also be trimmed (non-restoring), but that is marginal next to
-  this.
+  (WDIV's fused compare-subtract is already done; a further non-restoring / SRT
+  divider is marginal and fiddly next to just dropping it.)
 
 - [TASK] **Physical realization of one primitive** — the question the blueprint
   deliberately left below itself. On the diagram each MIN/MAX/NOT/COM/MOD/EQ box

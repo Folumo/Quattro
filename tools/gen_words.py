@@ -138,41 +138,50 @@ def generate(W):
     line('')
 
     # ============================ WDIV ===================================
-    # Base-4 restoring long division, W digit-stages, W+1-wide intermediates.
-    # Divide-by-zero gates every subtraction off -> quotient 0, remainder A.
+    # Base-4 restoring long division, W digit-stages. Comparison IS subtraction,
+    # so rather than three "R >= kB" tests (each a throwaway subtract) plus a
+    # fourth subtract of q*B, subtract B three times in a chain (Rp-B, -B, -B)
+    # and KEEP the differences: the borrows give the quotient digit, and the
+    # matching difference is the new remainder -- three subtractions per stage
+    # instead of four, and no 2B/3B to precompute. Divide-by-zero gates q to 0
+    # (so the remainder stays A). Returns (remainder, quotient); the machine's
+    # DIV op uses the quotient, and C's % is a - (a/b)*b, so the remainder feeds
+    # only the (never-read) flag -- but it is already computed, so it is free.
     WP = W + 1
     line('@ROM')
     line('def WDIV(A, B):')
     a = unpack('a', 'A', W)
     b = unpack('b', 'B', W)
-    # B, 2B, 3B as WP-digit values
     B1 = [b[i] for i in range(W)] + ['0']
-    line(f'    # B != 0 ?')
-    line(f'    bnz = NOT(EQ(MAX(' + 'MAX(' * (W - 2) + ', '.join(b[:2]) + ')' +
-         ''.join(f', {b[i]})' for i in range(2, W)) + ', 0))')
-    c, B2 = ripple_add(B1, B1, WP)
-    _, B3 = ripple_add(B2, B1, WP)
-    # remainder R starts at 0 (WP digits)
+    ortree = 'MAX(' * (W - 1) + b[0] + ''.join(f', {b[i]})' for i in range(1, W))
+    line(f'    bnz = NOT(EQ({ortree}, 0))')   # 3 if B != 0 else 0
     R = ['0'] * WP
     Q = [None] * W
     for i in range(W - 1, -1, -1):
-        # R' = R*4 + A_i  ==  shift digits up, insert a_i at bottom
-        Rp = [a[i]] + R[:W]   # WP digits
-        ge1 = wge(Rp, B1, WP)
-        ge2 = wge(Rp, B2, WP)
-        ge3 = wge(Rp, B3, WP)
-        # q = 3 if ge3 else 2 if ge2 else 1 if ge1 else 0, then gate by bnz
+        Rp = [a[i]] + R[:W]                    # R*4 + a_i (a free digit shift)
+        br1, D1 = ripple_sub(Rp, B1, WP)
+        br2, D2 = ripple_sub(D1, B1, WP)
+        br3, D3 = ripple_sub(D2, B1, WP)
+        e1, e2, e3 = fresh('e'), fresh('e'), fresh('e')
+        line(f'    {e1} = EQ({br1}, 0)')       # 3 if that subtract did NOT borrow
+        line(f'    {e2} = EQ({br2}, 0)')
+        line(f'    {e3} = EQ({br3}, 0)')
+        # q = bnz AND (Rp<B ? 0 : Rp<2B ? 1 : Rp<3B ? 2 : 3)
         q = fresh('q')
-        line(f'    {q} = MIN(bnz, MAX(MIN({ge3}, 3), MIN(EQ({ge3}, 0), '
-             f'MAX(MIN({ge2}, 2), MIN(EQ({ge2}, 0), MIN({ge1}, 1))))))')
-        # subtrahend = q * B : select among 0/B1/B2/B3
-        sub = []
+        line(f'    {q} = MIN(bnz, MIN({e1}, MAX(MIN({e2}, '
+             f'MAX(MIN({e3}, 3), MIN(NOT({e3}), 2))), MIN(NOT({e2}), 1))))')
+        q0, q1, q2, q3 = fresh('q'), fresh('q'), fresh('q'), fresh('q')
+        line(f'    {q0} = EQ({q}, 0)')
+        line(f'    {q1} = EQ({q}, 1)')
+        line(f'    {q2} = EQ({q}, 2)')
+        line(f'    {q3} = EQ({q}, 3)')
+        Rn = []                                # new remainder = the selected difference
         for k in range(WP):
-            sv = fresh('sb')
-            line(f'    {sv} = MAX(MAX(MIN(EQ({q}, 1), {B1[k]}), '
-                 f'MIN(EQ({q}, 2), {B2[k]})), MIN(EQ({q}, 3), {B3[k]}))')
-            sub.append(sv)
-        _, R = ripple_sub(Rp, sub, WP)
+            sv = fresh('r')
+            line(f'    {sv} = MAX(MAX(MIN({q0}, {Rp[k]}), MIN({q1}, {D1[k]})), '
+                 f'MAX(MIN({q2}, {D2[k]}), MIN({q3}, {D3[k]})))')
+            Rn.append(sv)
+        R = Rn
         Q[i] = q
     line(f'    Q = ({", ".join(Q)})')
     line(f'    R = ({", ".join(R[:W])})')
