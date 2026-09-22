@@ -268,6 +268,23 @@ Layout:
   still the single biggest block; the big remaining lever is the software-mul-div
   task below.
 
+- [DONE] **Q4 — a second CPU at 4 quarters (byte-wide), in `q4/`.** A whole new
+  8-bit machine from the same six primitives: word = 4 quarters = 8 bits = ONE
+  BYTE. That is the point — two wires per quarter makes a word a standard byte on
+  the wire (verified: the base-4 value == the 8-bit binary of the 2-bit-per-
+  quarter encoding for all 256 words), so it connects to real RAM / displays /
+  USB-HID bytes with no conversion. ALU generated at width 4 by the shared
+  tools/gen_words.py; register file (4 regs), 256-byte RAM, PC, a 16-instruction
+  ISA (arith/logic/mem/ctrl), a tiny assembler, demos (sum=55, mul=42, mem=99),
+  and a self-test (`python -m q4.test4`, 5/5). Census (`python -m q4.count4`):
+  **1,852 primitive gates** (ALU 1,645, regfile 84, glue 68, PC 55) — ~12x smaller
+  than the 32-bit machine (multiply/divide shrink with the square of the width).
+  **q4/HARDWARE.md** is a full bring-up guide: the base-4->binary encoding, wiring
+  real SRAM, a clock (555 / crystal), a display (HD44780 LCD, or UART, or VGA as a
+  separate video subsystem), and USB keyboard+mouse via a host-controller/MCU
+  bridge (RP2040 / CH9350) that hands the CPU plain bytes, memory-mapped like the
+  32-bit machine's devices.
+
 ## Open
 
 - [TASK] **The big ALU lever: no hardware multiply/divide (software instead).**
